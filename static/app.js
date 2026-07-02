@@ -37,6 +37,7 @@ const COLUNAS_TAB = [
   { key: 'competencia', label: 'Competência', valor: r => fmtCompetencia(r.Competencia), ordem: r => r.Competencia instanceof Date ? r.Competencia.getTime() : 0 },
   { key: 'vencimento',  label: 'Vencimento',  valor: r => fmtData(r.DataVencimento), ordem: r => r.DataVencimento instanceof Date ? r.DataVencimento.getTime() : 0 },
   { key: 'previsao',    label: 'Previsão',    valor: r => fmtData(r.DataPrevisaoConclusao), ordem: r => r.DataPrevisaoConclusao instanceof Date ? r.DataPrevisaoConclusao.getTime() : 0 },
+  { key: 'prioridade',  label: 'Prioridade',  valor: r => String(r.Prioridade || '') },
 ];
 
 const filtrosTab = {
@@ -806,7 +807,7 @@ function renderTabela(status) {
     : '';
 
   if (!rows.length) {
-    corpo.innerHTML = `<tr><td colspan="8" class="tabela-vazia">Nenhuma tarefa encontrada.</td></tr>`;
+    corpo.innerHTML = `<tr><td colspan="9" class="tabela-vazia">Nenhuma tarefa encontrada.</td></tr>`;
     return;
   }
 
@@ -829,6 +830,7 @@ function renderTabela(status) {
       <td>${fmtCompetencia(r.Competencia)}</td>
       <td>${fmtData(r.DataVencimento)}</td>
       <td>${fmtData(r.DataPrevisaoConclusao)}</td>
+      <td>${esc(r.Prioridade)}</td>
       <td>${colCmt}</td>
     </tr>`;
   }).join('');
