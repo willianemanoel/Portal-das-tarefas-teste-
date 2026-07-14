@@ -28,21 +28,48 @@ function clienteLabel(r) {
   return cod && raz ? `${cod} - ${raz}` : (cod || raz);
 }
 
-const COLUNAS_TAB = [
-  { key: 'cliente',     label: 'Cliente',     valor: r => clienteLabel(r) },
-  { key: 'grupo',       label: 'Grupo',       valor: r => String(r.Grupo || '') },
-  { key: 'tarefa',      label: 'Tarefa',      valor: r => String(r.Titulo || '') },
-  { key: 'coordenador', label: 'Coordenação', valor: r => String(r.Coordenador || '') },
-  { key: 'responsavel', label: 'Responsável', valor: r => String(r.UsuarioResponsavel || '') },
-  { key: 'competencia', label: 'Competência', valor: r => fmtCompetencia(r.Competencia), ordem: r => r.Competencia instanceof Date ? r.Competencia.getTime() : 0 },
-  { key: 'vencimento',  label: 'Vencimento',  valor: r => fmtData(r.DataVencimento), ordem: r => r.DataVencimento instanceof Date ? r.DataVencimento.getTime() : 0 },
-  { key: 'previsao',    label: 'Previsão',    valor: r => fmtData(r.DataPrevisaoConclusao), ordem: r => r.DataPrevisaoConclusao instanceof Date ? r.DataPrevisaoConclusao.getTime() : 0 },
-  { key: 'prioridade',  label: 'Prioridade',  valor: r => String(r.Prioridade || '') },
-];
+// Usuários "genéricos" de baixa: quando UsuarioBaixa é um destes, a baixa não
+// identifica quem realmente executou a tarefa (ex-funcionário, conta genérica),
+// então usamos o UsuarioResponsavel original como se ele tivesse baixado.
+const USUARIOS_BAIXA_GENERICOS = ['Juan Rodrigues', 'ex-funcionario', 'Nicole Oliveira', 'Gabriel Amaral'];
+
+function usuarioBaixaEfetivo(r) {
+  const baixa = String(r.UsuarioBaixa || '').trim();
+  if (USUARIOS_BAIXA_GENERICOS.includes(baixa)) return String(r.UsuarioResponsavel || '').trim();
+  return baixa;
+}
+
+const TODAS_CHAVES_TAB = ['cliente', 'grupo', 'tarefa', 'coordenador', 'responsavel', 'baixadopor', 'competencia', 'vencimento', 'previsao', 'databaixa', 'prioridade'];
+
+// Colunas da tabela de Tarefas: na aba 'Baixado', 'Previsão' vira 'Data de baixa'
+// (lendo DataBaixa) e 'Responsável' passa a ler UsuarioBaixa (quem baixou) em vez
+// de UsuarioResponsavel — nas demais abas (Em Atraso/Em Aberto) a tarefa ainda não
+// foi baixada, então previsão/responsável originais continuam fazendo sentido.
+function colunasTab() {
+  const colPrevisaoOuBaixa = estado.abaAtiva === 'Baixado'
+    ? { key: 'databaixa', label: 'Data de baixa', valor: r => fmtData(r.DataBaixa), ordem: r => r.DataBaixa instanceof Date ? r.DataBaixa.getTime() : 0 }
+    : { key: 'previsao',  label: 'Previsão',      valor: r => fmtData(r.DataPrevisaoConclusao), ordem: r => r.DataPrevisaoConclusao instanceof Date ? r.DataPrevisaoConclusao.getTime() : 0 };
+
+  const colResponsavel = estado.abaAtiva === 'Baixado'
+    ? { key: 'baixadopor', label: 'Responsável', valor: r => usuarioBaixaEfetivo(r) }
+    : { key: 'responsavel', label: 'Responsável', valor: r => String(r.UsuarioResponsavel || '') };
+
+  return [
+    { key: 'cliente',     label: 'Cliente',     valor: r => clienteLabel(r) },
+    { key: 'grupo',       label: 'Grupo',       valor: r => String(r.Grupo || '') },
+    { key: 'tarefa',      label: 'Tarefa',      valor: r => String(r.Titulo || '') },
+    { key: 'coordenador', label: 'Coordenação', valor: r => String(r.Coordenador || '') },
+    colResponsavel,
+    { key: 'competencia', label: 'Competência', valor: r => fmtCompetencia(r.Competencia), ordem: r => r.Competencia instanceof Date ? r.Competencia.getTime() : 0 },
+    { key: 'vencimento',  label: 'Vencimento',  valor: r => fmtData(r.DataVencimento), ordem: r => r.DataVencimento instanceof Date ? r.DataVencimento.getTime() : 0 },
+    colPrevisaoOuBaixa,
+    { key: 'prioridade',  label: 'Prioridade',  valor: r => String(r.Prioridade || '') },
+  ];
+}
 
 const filtrosTab = {
   busca: '',
-  excluidos: Object.fromEntries(COLUNAS_TAB.map(c => [c.key, new Set()])),
+  excluidos: Object.fromEntries(TODAS_CHAVES_TAB.map(k => [k, new Set()])),
 };
 let filtroColunaAberta = null;
 let draftExcluidos = null;
@@ -246,7 +273,7 @@ function normData(d) {
 function rankColaboradores(rows) {
   const contagem = {};
   for (const r of rows) {
-    const nome = String(r.UsuarioResponsavel || '').trim();
+    const nome = usuarioBaixaEfetivo(r);
     if (!nome) continue;
     contagem[nome] = (contagem[nome] || 0) + 1;
   }
@@ -331,7 +358,7 @@ async function gerarPDF() {
 
   const empMap = {};
   for (const r of base) {
-    const nome  = String(r.UsuarioResponsavel || '').trim();
+    const nome  = usuarioBaixaEfetivo(r);
     const coord = String(r.Coordenador || '').trim();
     if (!nome) continue;
     if (!empMap[nome]) empMap[nome] = { nome, coord, qtds: new Array(semanas.length).fill(0), total: 0 };
@@ -504,7 +531,7 @@ function mostrarTela3(dep) {
 
   Object.assign(filtrosRel, { coordenador: '', responsavel: '', grupo: '', busca: '' });
   filtrosTab.busca = '';
-  COLUNAS_TAB.forEach(col => filtrosTab.excluidos[col.key] = new Set());
+  TODAS_CHAVES_TAB.forEach(k => filtrosTab.excluidos[k] = new Set());
   document.getElementById('tab-busca').value = '';
   popularFiltrosPrefixo('rel', estado.depRows);
   renderFiltroColunas();
@@ -528,6 +555,8 @@ function mudarAba(btn) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('ativo'));
   btn.classList.add('ativo');
   estado.abaAtiva = btn.dataset.status;
+  fecharPaineisFiltro();
+  renderFiltroColunas();
   renderTabela(estado.abaAtiva);
 }
 
@@ -613,7 +642,7 @@ function limparFiltros(prefixo) {
 // ── Filtros da tabela de Tarefas (estilo Excel) ────────────
 function renderFiltroColunas() {
   const cont = document.getElementById('filtro-colunas-tab');
-  cont.innerHTML = COLUNAS_TAB.map(col => `
+  cont.innerHTML = colunasTab().map(col => `
     <div class="filtro-coluna" id="filtro-coluna-${col.key}">
       <button type="button" class="filtro-col-btn" onclick="toggleFiltroColuna('${col.key}')">
         <span class="filtro-col-label">${esc(col.label)}</span>
@@ -626,7 +655,7 @@ function renderFiltroColunas() {
 }
 
 function atualizarIndicadoresFiltro() {
-  COLUNAS_TAB.forEach(col => {
+  colunasTab().forEach(col => {
     const btn = document.querySelector(`#filtro-coluna-${col.key} .filtro-col-btn`);
     if (btn) btn.classList.toggle('filtro-ativo', filtrosTab.excluidos[col.key].size > 0);
   });
@@ -638,7 +667,7 @@ function linhasBaseTab() {
 
 function aplicarExcluidos(rows, excluidos, ignorarCol) {
   return rows.filter(r => {
-    for (const col of COLUNAS_TAB) {
+    for (const col of colunasTab()) {
       if (col.key === ignorarCol) continue;
       const excl = excluidos[col.key];
       if (excl && excl.size && excl.has(col.valor(r))) return false;
@@ -653,8 +682,9 @@ function aplicarBuscaTab(rows) {
   return rows.filter(r => {
     const hay = [
       r.CodCliente, r.RazaoSocial, r.Grupo, r.Titulo,
-      r.UsuarioResponsavel, r.Coordenador,
-      fmtCompetencia(r.Competencia), fmtData(r.DataVencimento), fmtData(r.DataPrevisaoConclusao)
+      estado.abaAtiva === 'Baixado' ? usuarioBaixaEfetivo(r) : r.UsuarioResponsavel, r.Coordenador,
+      fmtCompetencia(r.Competencia), fmtData(r.DataVencimento),
+      estado.abaAtiva === 'Baixado' ? fmtData(r.DataBaixa) : fmtData(r.DataPrevisaoConclusao)
     ].map(v => String(v || '').toLowerCase()).join('\0');
     return hay.includes(b);
   });
@@ -679,7 +709,7 @@ function fecharPaineisFiltro() {
 }
 
 function abrirPainelFiltro(key) {
-  const col = COLUNAS_TAB.find(c => c.key === key);
+  const col = colunasTab().find(c => c.key === key);
   const painel = document.getElementById(`painel-${key}`);
 
   const rowsBase = aplicarBuscaTab(aplicarExcluidos(linhasBaseTab(), filtrosTab.excluidos, key));
@@ -765,7 +795,7 @@ function agendarBuscaTab() {
 }
 
 function limparFiltrosTab() {
-  COLUNAS_TAB.forEach(col => filtrosTab.excluidos[col.key] = new Set());
+  TODAS_CHAVES_TAB.forEach(k => filtrosTab.excluidos[k] = new Set());
   filtrosTab.busca = '';
   document.getElementById('tab-busca').value = '';
   fecharPaineisFiltro();
@@ -801,6 +831,10 @@ function renderTabela(status) {
   const rows = sortRows(filtrarRowsTab(estado.depRows.filter(r => r.Status === status)));
   const corpo = document.getElementById('tabela-corpo');
   const contador = document.getElementById('tab-contador');
+  const ehBaixado = status === 'Baixado';
+
+  const thPrevisaoBaixa = document.getElementById('th-previsao-baixa');
+  if (thPrevisaoBaixa) thPrevisaoBaixa.textContent = ehBaixado ? 'Data de baixa' : 'Previsão';
 
   contador.innerHTML = rows.length
     ? `<span>${rows.length.toLocaleString('pt-BR')}</span> Tarefa${rows.length !== 1 ? 's' : ''}`
@@ -826,10 +860,10 @@ function renderTabela(status) {
       <td>${cliente}</td>
       <td>${esc(r.Grupo)}</td>
       <td>${esc(r.Titulo)}</td>
-      <td>${esc(r.UsuarioResponsavel)}</td>
+      <td>${ehBaixado ? esc(usuarioBaixaEfetivo(r)) : esc(r.UsuarioResponsavel)}</td>
       <td>${fmtCompetencia(r.Competencia)}</td>
       <td>${fmtData(r.DataVencimento)}</td>
-      <td>${fmtData(r.DataPrevisaoConclusao)}</td>
+      <td>${ehBaixado ? fmtData(r.DataBaixa) : fmtData(r.DataPrevisaoConclusao)}</td>
       <td>${esc(r.Prioridade)}</td>
       <td>${colCmt}</td>
     </tr>`;
