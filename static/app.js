@@ -99,68 +99,6 @@ function fmtCompetencia(v) {
   return String(v);
 }
 
-// ── Resumo percentual (Em Atraso / Em Aberto / Baixada em Atraso / Baixada Antecipadamente) ──
-const RESUMO_CATEGORIAS = [
-  { chave: 'Em Atraso',               label: 'Em Atraso',               cor: '#C00000' },
-  { chave: 'Em Aberto',                label: 'Em Aberto',               cor: '#E07B00' },
-  { chave: 'Baixada em Atraso',        label: 'Baixada em Atraso',       cor: '#C8A000' },
-  { chave: 'Baixada Antecipadamente',  label: 'Baixada Antecipadamente', cor: '#1E8C3A' },
-];
-
-// Baixada após o vencimento = em atraso; no mesmo dia ou antes = antecipada/no prazo.
-function statusResumo(r) {
-  if (r.Status === 'Em Atraso') return 'Em Atraso';
-  if (r.Status === 'Em Aberto') return 'Em Aberto';
-  if (r.Status === 'Baixado') {
-    if (!(r.DataBaixa instanceof Date) || !(r.DataVencimento instanceof Date)) return null;
-    return normData(r.DataBaixa).getTime() > normData(r.DataVencimento).getTime()
-      ? 'Baixada em Atraso'
-      : 'Baixada Antecipadamente';
-  }
-  return null;
-}
-
-function renderResumoPercentual(containerId, rows) {
-  const el = document.getElementById(containerId);
-  const contagem = {};
-  RESUMO_CATEGORIAS.forEach(c => { contagem[c.chave] = 0; });
-
-  let total = 0;
-  rows.forEach(r => {
-    const cat = statusResumo(r);
-    if (cat) { contagem[cat]++; total++; }
-  });
-
-  if (!total) {
-    el.innerHTML = `
-      <div class="resumo-percentual-titulo">Resumo Geral</div>
-      <p class="secao-vazio">Nenhum dado disponível.</p>
-    `;
-    return;
-  }
-
-  const segmentos = RESUMO_CATEGORIAS.map(c => {
-    const pct = (contagem[c.chave] / total) * 100;
-    return `<div class="resumo-segmento" style="width:${pct}%;background:${c.cor}" title="${c.label}: ${contagem[c.chave].toLocaleString('pt-BR')} (${Math.round(pct)}%)"></div>`;
-  }).join('');
-
-  const legenda = RESUMO_CATEGORIAS.map(c => {
-    const pct = Math.round((contagem[c.chave] / total) * 100);
-    return `
-      <div class="resumo-legenda-item">
-        <span class="resumo-legenda-dot" style="background:${c.cor}"></span>
-        <span>${c.label}</span>
-        <span class="resumo-legenda-valor">${pct}%</span>
-      </div>`;
-  }).join('');
-
-  el.innerHTML = `
-    <div class="resumo-percentual-titulo">Resumo Geral</div>
-    <div class="resumo-barra">${segmentos}</div>
-    <div class="resumo-legenda">${legenda}</div>
-  `;
-}
-
 function contarStatus(rows) {
   let emAtraso = 0, emAberto = 0, baixadas = 0;
   for (const r of rows) {
@@ -233,11 +171,12 @@ function setBreadcrumb(partes) {
 // ── Placares ─────────────────────────────────────────────
 function renderPlacares(containerId, rows) {
   const c = contarStatus(rows);
+  const pct = v => c.total ? `${Math.round((v / c.total) * 100)}% do total` : '0% do total';
   const defs = [
     { classe: 'total',   valor: c.total,    label: 'Total de Tarefas', desc: 'da competência' },
-    { classe: 'atraso',  valor: c.emAtraso, label: 'Em Atraso',        desc: 'tarefas' },
-    { classe: 'aberto',  valor: c.emAberto, label: 'Em Aberto',        desc: 'tarefas' },
-    { classe: 'baixado', valor: c.baixadas, label: 'Baixadas',         desc: 'tarefas' },
+    { classe: 'atraso',  valor: c.emAtraso, label: 'Em Atraso',        desc: pct(c.emAtraso) },
+    { classe: 'aberto',  valor: c.emAberto, label: 'Em Aberto',        desc: pct(c.emAberto) },
+    { classe: 'baixado', valor: c.baixadas, label: 'Baixadas',         desc: pct(c.baixadas) },
   ];
 
   document.getElementById(containerId).innerHTML = defs.map(p => `
@@ -600,7 +539,6 @@ function mostrarTela3(dep) {
 
   setBreadcrumb(['Painel de controle', estado.unidade.nome, dep]);
   renderPlacares('placares-tela3', estado.depRows);
-  renderResumoPercentual('resumo-tela3', estado.depRows);
   renderRelatorios(estado.depRows);
 
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('ativo'));
