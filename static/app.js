@@ -10,13 +10,12 @@ const UNIDADES = [
 ];
 
 // ── Estado ───────────────────────────────────────────────
-const DADOS_UNIDADE      = {};   // cod → array de rows
-const PROMESSAS          = {};   // cod → Promise
-const DATAS_ATUALIZACAO  = {};   // cod → string data formatada
+const RESUMO_UNIDADE = {};   // cod → { total, emAtraso, emAberto, baixadas, departamentos }
+let DATA_ATUALIZACAO  = '';  // string data formatada (geral, de todas as unidades)
 
 const estado = {
   unidade:      null,
-  unidadeRows:  [],
+  unidadeResumo: null,
   departamento: null,
   depRows:      [],
   abaAtiva:     'Em Atraso',
@@ -115,32 +114,37 @@ function contarStatus(rows) {
 // ── Carregamento ──────────────────────────────────────────
 const CAMPOS_DATA = ['DataVencimento', 'DataPrevisaoConclusao', 'DataBaixa'];
 
-function _carregarArquivo(cod) {
-  PROMESSAS[cod] = fetch(`${API_BASE}/api/tarefas?unidade=${encodeURIComponent(cod)}`)
-    .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    })
-    .then(({ atualizado_em, tarefas }) => {
-      if (atualizado_em) {
-        const d = new Date(atualizado_em);
-        const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-        DATAS_ATUALIZACAO[cod] = d.toLocaleDateString('pt-BR') + ' ' + hora;
-      }
-      // Converte os campos de data (que chegam como texto ISO no JSON)
-      // de volta para objetos Date, igual o XLSX.js fazia antes.
-      DADOS_UNIDADE[cod] = tarefas.map(row => {
-        const r = { ...row };
-        for (const campo of CAMPOS_DATA) {
-          if (r[campo]) r[campo] = new Date(r[campo]);
-        }
-        return r;
-      });
-    })
-    .catch(err => {
-      DADOS_UNIDADE[cod] = null;
-      console.error(`Erro ao carregar tarefas de ${cod}:`, err);
-    });
+function converterDatas(tarefas) {
+  return tarefas.map(row => {
+    const r = { ...row };
+    for (const campo of CAMPOS_DATA) {
+      if (r[campo]) r[campo] = new Date(r[campo]);
+    }
+    return r;
+  });
+}
+
+// Busca só o resumo (contagens agregadas) de uma unidade — leve mesmo
+// para unidades com dezenas de milhares de tarefas, porque a API nunca
+// devolve as linhas em si aqui, só números já somados.
+async function carregarResumoUnidade(cod) {
+  if (RESUMO_UNIDADE[cod]) return RESUMO_UNIDADE[cod];
+  const r = await fetch(`${API_BASE}/api/resumo?unidade=${encodeURIComponent(cod)}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const resumo = await r.json();
+  RESUMO_UNIDADE[cod] = resumo;
+  return resumo;
+}
+
+// Busca as tarefas de um departamento específico — isso é o que mantém
+// o payload pequeno mesmo em unidades grandes (ex: SP tem ~58 mil tarefas
+// no total, mas cada departamento individualmente é uma fração disso).
+async function carregarTarefasDepartamento(cod, departamento) {
+  const url = `${API_BASE}/api/tarefas?unidade=${encodeURIComponent(cod)}&departamento=${encodeURIComponent(departamento)}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const { tarefas } = await r.json();
+  return converterDatas(tarefas);
 }
 
 async function iniciarCarregamento() {
@@ -190,8 +194,11 @@ function setBreadcrumb(partes) {
 }
 
 // ── Placares ─────────────────────────────────────────────
-function renderPlacares(containerId, rows) {
-  const c = contarStatus(rows);
+// Aceita um array de linhas (calcula as contagens aqui) OU um objeto de
+// contagens já pronto, tipo { total, emAtraso, emAberto, baixadas }
+// (o que vem direto da API em /api/resumo, sem precisar das linhas).
+function renderPlacares(containerId, rowsOuContagens) {
+  const c = Array.isArray(rowsOuContagens) ? contarStatus(rowsOuContagens) : rowsOuContagens;
   const pct = v => c.total ? `${Math.round((v / c.total) * 100)}% do total` : '0% do total';
   const defs = [
     { classe: 'total',   valor: c.total,    label: 'Total de Tarefas', desc: 'da competência' },
@@ -220,61 +227,56 @@ function renderCards() {
 
 // ── Tela 2 ───────────────────────────────────────────────
 async function mostrarTela2(cod, nome) {
-  if (!DADOS_UNIDADE[cod]) {
-    if (!PROMESSAS[cod]) _carregarArquivo(cod);
-    const loading = document.getElementById('loading');
-    loading.querySelector('p').textContent = `Carregando ${nome}...`;
-    loading.style.display = 'flex';
-    try {
-      await PROMESSAS[cod];
-    } finally {
-      loading.style.display = 'none';
-    }
-  }
+  const loading = document.getElementById('loading');
+  loading.querySelector('p').textContent = `Carregando ${nome}...`;
+  loading.style.display = 'flex';
 
-  if (DADOS_UNIDADE[cod] === null) {
-    alert(`Erro ao carregar os dados de ${nome}. Verifique o arquivo e recarregue a página.`);
+  let resumo;
+  try {
+    resumo = await carregarResumoUnidade(cod);
+  } catch (err) {
+    console.error(`Erro ao carregar resumo de ${cod}:`, err);
+    loading.style.display = 'none';
+    alert(`Erro ao carregar os dados de ${nome}. Recarregue a página e tente de novo.`);
     return;
   }
+  loading.style.display = 'none';
 
-  estado.unidade     = { cod, nome };
-  estado.unidadeRows = DADOS_UNIDADE[cod];
+  estado.unidade = { cod, nome };
+  // Guardamos o resumo (não as tarefas em si — essas só chegam quando o
+  // usuário entra num departamento específico, em mostrarTela3).
+  estado.unidadeResumo = resumo;
 
   setBreadcrumb(['Painel de controle', nome]);
-  renderPlacares('placares-tela2', estado.unidadeRows);
-  renderDepartamentos(estado.unidadeRows);
+  renderPlacares('placares-tela2', resumo);
+  renderDepartamentos(resumo.departamentos);
   trocarTela('tela-2');
 }
 
-function renderDepartamentos(rows) {
-  const deps = [...new Set(rows.map(r => r.Departamento).filter(Boolean))].sort();
-
-  document.getElementById('deps-grid').innerHTML = deps.map(dep => {
-    const dr = rows.filter(r => r.Departamento === dep);
-    const c  = contarStatus(dr);
-    return `
-      <div class="dep-card" onclick="mostrarTela3('${esc(dep)}')">
-        <div class="dep-nome">${esc(dep)}</div>
+function renderDepartamentos(departamentos) {
+  document.getElementById('deps-grid').innerHTML = departamentos.map(dep => `
+      <div class="dep-card" onclick="mostrarTela3('${esc(dep.nome)}')">
+        <div class="dep-nome">${esc(dep.nome)}</div>
         <div class="dep-linhas">
           <div class="dep-linha">
             <span class="dep-dot atraso"></span>
             <span class="dep-linha-texto">Em Atraso</span>
-            <span class="dep-linha-valor">${c.emAtraso.toLocaleString('pt-BR')}</span>
+            <span class="dep-linha-valor">${dep.emAtraso.toLocaleString('pt-BR')}</span>
           </div>
           <div class="dep-linha">
             <span class="dep-dot aberto"></span>
             <span class="dep-linha-texto">Em Aberto</span>
-            <span class="dep-linha-valor">${c.emAberto.toLocaleString('pt-BR')}</span>
+            <span class="dep-linha-valor">${dep.emAberto.toLocaleString('pt-BR')}</span>
           </div>
           <div class="dep-linha">
             <span class="dep-dot baixado"></span>
             <span class="dep-linha-texto">Baixadas</span>
-            <span class="dep-linha-valor">${c.baixadas.toLocaleString('pt-BR')}</span>
+            <span class="dep-linha-valor">${dep.baixadas.toLocaleString('pt-BR')}</span>
           </div>
         </div>
         <div class="dep-footer">Clique aqui para ver os detalhes</div>
-      </div>`;
-  }).join('');
+      </div>`
+  ).join('');
 }
 
 // ── Relatórios ────────────────────────────────────────────
@@ -547,9 +549,32 @@ async function gerarPDF() {
 }
 
 // ── Tela 3 ───────────────────────────────────────────────
-function mostrarTela3(dep) {
+const TAREFAS_DEPARTAMENTO = {}; // "cod::departamento" → array de rows (cache simples)
+
+async function mostrarTela3(dep) {
+  const cod = estado.unidade.cod;
+  const chaveCache = `${cod}::${dep}`;
+
+  const loading = document.getElementById('loading');
+  loading.querySelector('p').textContent = `Carregando ${dep}...`;
+  loading.style.display = 'flex';
+
+  let rows;
+  try {
+    if (!TAREFAS_DEPARTAMENTO[chaveCache]) {
+      TAREFAS_DEPARTAMENTO[chaveCache] = await carregarTarefasDepartamento(cod, dep);
+    }
+    rows = TAREFAS_DEPARTAMENTO[chaveCache];
+  } catch (err) {
+    console.error(`Erro ao carregar tarefas de ${dep}:`, err);
+    loading.style.display = 'none';
+    alert(`Erro ao carregar as tarefas de ${dep}. Recarregue a página e tente de novo.`);
+    return;
+  }
+  loading.style.display = 'none';
+
   estado.departamento = dep;
-  estado.depRows      = estado.unidadeRows.filter(r => r.Departamento === dep);
+  estado.depRows      = rows;
   estado.abaAtiva     = 'Em Atraso';
 
   Object.assign(filtrosRel, { coordenador: '', responsavel: '', grupo: '', busca: '' });
