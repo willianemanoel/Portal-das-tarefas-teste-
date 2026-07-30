@@ -889,7 +889,7 @@ function toggleComentario(btn, id) {
 }
 
 // ── Navegação ─────────────────────────────────────────────
-function trocarTela(id) {11
+function trocarTela(id) {
   ['tela-1', 'tela-2', 'tela-3'].forEach(t =>
     document.getElementById(t).classList.toggle('hidden', t !== id)
   );
