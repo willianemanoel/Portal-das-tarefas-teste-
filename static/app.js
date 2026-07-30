@@ -1,5 +1,5 @@
 // ── Configuração da API ──────────────────────────────────
-const API_BASE = 'https://portal-tarefas-api.onrender.com'; // TODO: colocar a URL real da API depois do deploy
+const API_BASE = 'https://SEU-SERVICO-API.onrender.com'; // TODO: colocar a URL real da API depois do deploy
 
 // ── Unidades ─────────────────────────────────────────────
 const UNIDADES = [
@@ -144,20 +144,31 @@ function _carregarArquivo(cod) {
 }
 
 async function iniciarCarregamento() {
-  UNIDADES.forEach(u => _carregarArquivo(u.cod));
-  await Promise.all(UNIDADES.map(u => PROMESSAS[u.cod]));
-
-  const dataBase = Object.values(DATAS_ATUALIZACAO).find(Boolean);
-  if (dataBase) {
-    const hoje = new Date();
-    const fimMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
-    const fimMesStr = `${String(fimMes.getDate()).padStart(2,'0')}/${String(fimMes.getMonth()+1).padStart(2,'0')}`;
-    document.getElementById('topbar-atualizacao').innerHTML =
-      `Base atualizada em ${dataBase}` +
-      `<span class="topbar-sep">|</span>` +
-      `Tarefas com vencimento até ${fimMesStr}` +
-      `<span class="topbar-sep">|</span>` +
-      `Para atualizar seus dados recarregue a página ou pressione 'Ctrl+F5'`;
+  // Não carrega mais todas as unidades de uma vez (SP sozinho tem 58 mil+
+  // tarefas — carregar as 4 unidades juntas no início estourava a memória
+  // da API). Cada unidade só é buscada quando o usuário clica nela
+  // (veja mostrarTela2). Aqui só buscamos a data de atualização, que é leve.
+  try {
+    const r = await fetch(`${API_BASE}/api/atualizacao`);
+    if (r.ok) {
+      const { atualizado_em } = await r.json();
+      if (atualizado_em) {
+        const d = new Date(atualizado_em);
+        const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        const dataBase = d.toLocaleDateString('pt-BR') + ' ' + hora;
+        const hoje = new Date();
+        const fimMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+        const fimMesStr = `${String(fimMes.getDate()).padStart(2,'0')}/${String(fimMes.getMonth()+1).padStart(2,'0')}`;
+        document.getElementById('topbar-atualizacao').innerHTML =
+          `Base atualizada em ${dataBase}` +
+          `<span class="topbar-sep">|</span>` +
+          `Tarefas com vencimento até ${fimMesStr}` +
+          `<span class="topbar-sep">|</span>` +
+          `Para atualizar seus dados recarregue a página ou pressione 'Ctrl+F5'`;
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao buscar data de atualização:', err);
   }
 
   document.getElementById('loading').style.display = 'none';
@@ -210,6 +221,7 @@ function renderCards() {
 // ── Tela 2 ───────────────────────────────────────────────
 async function mostrarTela2(cod, nome) {
   if (!DADOS_UNIDADE[cod]) {
+    if (!PROMESSAS[cod]) _carregarArquivo(cod);
     const loading = document.getElementById('loading');
     loading.querySelector('p').textContent = `Carregando ${nome}...`;
     loading.style.display = 'flex';
