@@ -1,9 +1,12 @@
+// ── Configuração da API ──────────────────────────────────
+const API_BASE = 'https://portal-tarefas-api.onrender.com'; // TODO: colocar a URL real da API depois do deploy
+
 // ── Unidades ─────────────────────────────────────────────
 const UNIDADES = [
-  { cod: 'SP',     nome: 'São Paulo',      arquivo: 'dados/base/sao_paulo.xlsx' },
-  { cod: 'GOIAS',  nome: 'Goiás',          arquivo: 'dados/base/goias.xlsx' },
-  { cod: 'RJ',     nome: 'Rio de Janeiro', arquivo: 'dados/base/rio_de_janeiro.xlsx' },
-  { cod: 'Santos', nome: 'Santos',         arquivo: 'dados/base/santos.xlsx' },
+  { cod: 'SP',     nome: 'São Paulo' },
+  { cod: 'GOIAS',  nome: 'Goiás' },
+  { cod: 'RJ',     nome: 'Rio de Janeiro' },
+  { cod: 'Santos', nome: 'Santos' },
 ];
 
 // ── Estado ───────────────────────────────────────────────
@@ -110,31 +113,38 @@ function contarStatus(rows) {
 }
 
 // ── Carregamento ──────────────────────────────────────────
-function _carregarArquivo(cod, arquivo) {
-  PROMESSAS[cod] = fetch(arquivo)
+const CAMPOS_DATA = ['DataVencimento', 'DataPrevisaoConclusao', 'DataBaixa'];
+
+function _carregarArquivo(cod) {
+  PROMESSAS[cod] = fetch(`${API_BASE}/api/tarefas?unidade=${encodeURIComponent(cod)}`)
     .then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const lastMod = r.headers.get('Last-Modified');
-      if (lastMod) {
-        const d = new Date(lastMod);
+      return r.json();
+    })
+    .then(({ atualizado_em, tarefas }) => {
+      if (atualizado_em) {
+        const d = new Date(atualizado_em);
         const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         DATAS_ATUALIZACAO[cod] = d.toLocaleDateString('pt-BR') + ' ' + hora;
       }
-      return r.arrayBuffer();
-    })
-    .then(buf => {
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-      const ws = wb.Sheets['Pendencias'];
-      DADOS_UNIDADE[cod] = XLSX.utils.sheet_to_json(ws, { raw: true });
+      // Converte os campos de data (que chegam como texto ISO no JSON)
+      // de volta para objetos Date, igual o XLSX.js fazia antes.
+      DADOS_UNIDADE[cod] = tarefas.map(row => {
+        const r = { ...row };
+        for (const campo of CAMPOS_DATA) {
+          if (r[campo]) r[campo] = new Date(r[campo]);
+        }
+        return r;
+      });
     })
     .catch(err => {
       DADOS_UNIDADE[cod] = null;
-      console.error(`Erro ao carregar ${arquivo}:`, err);
+      console.error(`Erro ao carregar tarefas de ${cod}:`, err);
     });
 }
 
 async function iniciarCarregamento() {
-  UNIDADES.forEach(u => _carregarArquivo(u.cod, u.arquivo));
+  UNIDADES.forEach(u => _carregarArquivo(u.cod));
   await Promise.all(UNIDADES.map(u => PROMESSAS[u.cod]));
 
   const dataBase = Object.values(DATAS_ATUALIZACAO).find(Boolean);
@@ -879,7 +889,7 @@ function toggleComentario(btn, id) {
 }
 
 // ── Navegação ─────────────────────────────────────────────
-function trocarTela(id) {
+function trocarTela(id) {11
   ['tela-1', 'tela-2', 'tela-3'].forEach(t =>
     document.getElementById(t).classList.toggle('hidden', t !== id)
   );
