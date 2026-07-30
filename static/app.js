@@ -1,5 +1,5 @@
 // ── Configuração da API ──────────────────────────────────
-const API_BASE = 'https://portal-tarefas-api.onrender.com'; // TODO: colocar a URL real da API depois do deploy
+const API_BASE = 'https://SEU-SERVICO-API.onrender.com'; // TODO: colocar a URL real da API depois do deploy
 
 // ── Unidades ─────────────────────────────────────────────
 const UNIDADES = [
